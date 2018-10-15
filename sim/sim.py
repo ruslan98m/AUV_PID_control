@@ -1,93 +1,96 @@
+# -*- coding: utf-8 -*-
+
 import zmq
 import time
 import struct
 import numpy as np
 
-def setDepth(dp):
+def set_depth(dp):
     return dp
 
-def setYaw(x,y): 
+def set_yaw(x,y): 
     return x,y
 
-context = zmq.Context()
+def constrain(var,min,max):
+    if var>max:
+        var=max
+    elif var<min:
+        var=min
+    return var
+
+def main():
+    context = zmq.Context()
  
-subscriber = context.socket (zmq.SUB)
-subscriber.connect ("tcp://127.0.0.1:3390")
-subscriber.setsockopt(zmq.SUBSCRIBE, b"")
+    subscriber = context.socket (zmq.SUB)
+    subscriber.connect ("tcp://127.0.0.1:3390")
+    subscriber.setsockopt(zmq.SUBSCRIBE, b"")
 
-simulator = context.socket (zmq.PAIR)
-simulator.connect("tcp://127.0.0.1:3391")
+    simulator = context.socket (zmq.PAIR)
+    simulator.connect("tcp://127.0.0.1:3391")
 
-Kp=np.array([1,5])
-Ki=np.array([0.2,2]) #PID gain coeffiicients
-Kd=np.array([0.1,2])
+    Kp=np.array([1,5])
+    Ki=np.array([0.2,2]) #PID gain coeffiicients
+    Kd=np.array([0.1,2])
 
-I1=0
-I0=0
-yawErrLast=0
-depthErrLast=0
+    I_depth=0
+    I_yaw=0
+    lastYawError=0
+    lastDepthError=0
 
-startTime = time.time()
-message = subscriber.recv()
+    startTime = time.time()
+    #recvMessage = subscriber.recv()
 
-targetDepth=setDepth(40)
-V,targetYaw=setYaw(30,-35)
+    targetDepth=set_depth(40)
+    Force,targetYaw=set_yaw(30,-35)
 
-while True:
 
-    message = subscriber.recv()
+    while True:
+
+        recvMessage = subscriber.recv()
     
-    ts=time.time() - startTime #time step
+        timeStep=time.time() - startTime 
 
-    yaw=struct.unpack('<f',message[16:20])
-    yaw=float(".".join(map(str,yaw))) 
-    depth=struct.unpack('<f',message[20:24])
-    depth=float(".".join(map(str,depth)))
+        realYaw=struct.unpack('<f',recvMessage[16:20])
+        realYaw=float(".".join(map(str,realYaw))) 
+        realDepth=struct.unpack('<f',recvMessage[20:24])
+        realDepth=float(".".join(map(str,realDepth)))
 
-    if yaw<=360 and yaw>=180:   
-        yaw=-(360-yaw)
+        if realYaw<=360 and realYaw>=180:   
+           realYaw=-360+realYaw
 
-    if targetYaw<0:
-        targetYaw=360+targetYaw
+        if targetYaw<0:
+            targetYaw=360+targetYaw
 
-    if targetYaw<=360 and targetYaw>=180:
-        targetYaw=-(360-targetYaw)
+        if targetYaw<=360 and targetYaw>=180:
+            targetYaw=-360+targetYaw
     
-          
-   
-    
-    depthErr=targetDepth-depth
-    yawErr=targetYaw-yaw
+        depthError=targetDepth-realDepth
+        yawError=targetYaw-realYaw
         
-    P0=Kp[0]*yawErr
-    I0=I0+Ki[0]*yawErr*ts               #Yaw control PID loop
-    D0=Kd[0]*(yawErr-yawErrLast)/ts
+        P_yaw=Kp[0]*yawError
+        I_yaw=I_yaw+Ki[0]*yawError*timeStep               #Yaw control PID loop
+        D_yaw=Kd[0]*(yawError-lastYawError)/timeStep
 
-    P1=Kp[1]*depthErr
-    I1=I1+Ki[1]*depthErr*ts             #Depth control PID loop
-    D1=Kd[1]*(depthErr-depthErrLast)/ts
+        P_depth=Kp[1]*depthError
+        I_depth=I_depth+Ki[1]*depthError*timeStep             #Depth control PID loop
+        D_depth=Kd[1]*(depthError-lastDepthError)/timeStep
 
+        U_yaw=P_yaw+D_yaw+I_yaw
+        U_depth=P_depth+D_depth+I_depth
+
+        U_yaw=constrain(U_yaw,-80,80)
+        U_depth=constrain(U_depth,-100,100)
     
-    U0=P0+D0+I0
-    U1=P1+D1+I1
-
-    if U0>80:
-        U0=80
-    elif U0<-80:
-        U0=-80
+        lasrYawError=yawError
+        lastDepthError=depthError
     
-    if U1<-100:
-        U1=-100
-    elif U1>100:
-        U1=100
+        trasterForces=np.array([-Force-U_yaw,-Force+U_yaw,U_depth,0])
+        trasterForces=trasterForces.astype('uint8')
+        startTime=time.time()
 
-    yawErrLast=yawErr
-    depthErrLast=depthErr
-    
-    trast=np.array([-V-U0,-V+U0,U1,0])
-    trast=trast.astype('uint8')
-    startTime=time.time()
+        simulator.send(trasterForces)
+        
+if __name__ == '__main__':
+    main()
 
-    simulator.send(trast)
-   
  

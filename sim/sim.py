@@ -19,6 +19,7 @@ def constrain(var,min,max):
     return var
 
 def main():
+
     context = zmq.Context()
  
     subscriber = context.socket (zmq.SUB)
@@ -38,7 +39,6 @@ def main():
     lastDepthError=0
 
     startTime = time.time()
-    #recvMessage = subscriber.recv()
 
     targetDepth=set_depth(40)
     Force,targetYaw=set_yaw(30,-35)
@@ -56,13 +56,10 @@ def main():
         realDepth=float(".".join(map(str,realDepth)))
 
         if realYaw<=360 and realYaw>=180:   
-           realYaw=-360+realYaw
-
-        if targetYaw<0:
-            targetYaw=360+targetYaw
+           realYaw-=360
 
         if targetYaw<=360 and targetYaw>=180:
-            targetYaw=-360+targetYaw
+            targetYaw-=360
     
         depthError=targetDepth-realDepth
         yawError=targetYaw-realYaw
